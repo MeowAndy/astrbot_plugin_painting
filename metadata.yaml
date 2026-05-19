@@ -1,0 +1,8 @@
+name: astrbot_plugin_painting
+display_name: Painting 画图
+short_desc: AI 画图插件 - 支持预设画图、自定义提示词画图、次数管理
+desc: 从 Yunzai Painting.js 移植的 AstrBot 画图插件，支持预设画图（云端焚决）、#bnn 自定义提示词画图（含多图输入）、群/个人次数管理、API 余额查询等功能。
+version: v1.0.0
+author: MeowAndy
+repo: https://github.com/MeowAndy/astrbot_plugin_painting
+astrbot_version: ">=4.5,<5"

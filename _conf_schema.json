@@ -1,0 +1,83 @@
+{
+  "api_url": {
+    "type": "string",
+    "description": "Chat Completions API 地址（用于预设画图）",
+    "default": "https://cpa.forgotdream.cn/4dream/v1/chat/completions",
+    "hint": "OpenAI 兼容的 /v1/chat/completions 接口地址"
+  },
+  "api_key": {
+    "type": "string",
+    "description": "API Key",
+    "default": "",
+    "hint": "你的 API 密钥，sk-xxx 格式"
+  },
+  "model_name": {
+    "type": "string",
+    "description": "Chat 模型名称",
+    "default": "gpt-5.5",
+    "hint": "用于预设画图的模型"
+  },
+  "image_api_url": {
+    "type": "string",
+    "description": "Images Generations API 地址（用于 #bnn 画图）",
+    "default": "https://cpa.forgotdream.cn/4dream/v1/images/generations",
+    "hint": "OpenAI 兼容的 /v1/images/generations 接口地址"
+  },
+  "image_model_name": {
+    "type": "string",
+    "description": "图片生成模型名称",
+    "default": "gpt-image-2",
+    "hint": "用于 #bnn 画图的模型"
+  },
+  "api_timeout": {
+    "type": "int",
+    "description": "API 请求超时时间（秒）",
+    "default": 240,
+    "hint": "gpt-image-2 生图较慢，建议 180~300 秒",
+    "slider": {
+      "min": 30,
+      "max": 600,
+      "step": 10
+    }
+  },
+  "bnn_max_count": {
+    "type": "int",
+    "description": "#bnn 单次最多生成图片数量",
+    "default": 5,
+    "hint": "防止滥用，限制单次最多生成几张",
+    "slider": {
+      "min": 1,
+      "max": 10,
+      "step": 1
+    }
+  },
+  "initial_user_count": {
+    "type": "int",
+    "description": "新用户/群初始画图次数",
+    "default": 10,
+    "hint": "首次使用时自动分配的次数",
+    "slider": {
+      "min": 0,
+      "max": 100,
+      "step": 5
+    }
+  },
+  "preset_json_url": {
+    "type": "string",
+    "description": "预设 JSON 远程地址",
+    "default": "https://ht.pippi.top/pippi.json",
+    "hint": "云端预设（焚决）的 JSON 下载地址"
+  },
+  "bot_name": {
+    "type": "string",
+    "description": "机器人角色名",
+    "default": "菲比",
+    "hint": "回复消息中使用的角色名"
+  },
+  "balance_base_url": {
+    "type": "string",
+    "description": "余额查询 API 基础地址（可选）",
+    "default": "",
+    "hint": "留空则禁用余额查询功能"
+  }
+}
