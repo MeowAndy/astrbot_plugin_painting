@@ -462,7 +462,7 @@ class PaintingPlugin(Star):
     # Commands
     # =========================
 
-    @filter.regex(r"^#?(绘图更新预设|更新焚决)$")
+    @filter.command("更新焚决", alias=["绘图更新预设"])
     async def update_resources(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，只有主人才能更新{self.bot_name}的魔法书哦~ 🙅‍♀️")
@@ -474,7 +474,7 @@ class PaintingPlugin(Star):
         else:
             yield event.plain_result("更新失败啦，请查看后台控制台日志。🥺")
 
-    @filter.regex(r"^#绘图帮助$")
+    @filter.command("绘图帮助")
     async def show_help(self, event: AstrMessageEvent):
         preset_lines = []
         for idx, preset in enumerate(self.presets, 1):
@@ -499,9 +499,9 @@ class PaintingPlugin(Star):
             f"#查询额度 / #查余额 - 查询 API 状态（需要配置 balance_base_url）"
         )
 
-    @filter.regex(r"^#绘图查询次数(?:\s+(.+))?$")
+    @filter.command("绘图查询次数")
     async def query_usage_count(self, event: AstrMessageEvent):
-        raw = re.sub(r"^#绘图查询次数", "", self.text(event)).strip()
+        raw = event.message_str.strip()
         stats = await self.daily_stats()
         target_id = None
         label = ""
@@ -531,12 +531,12 @@ class PaintingPlugin(Star):
             f"🏆 {self.bot_name}历史总共作画：{stats.get('historyTotal', 0)}张"
         )
 
-    @filter.regex(r"^#绘图增加次数\s*(\d+)?(?:\s+(.+))?$")
+    @filter.command("绘图增加次数")
     async def add_usage_count(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        raw = re.sub(r"^#绘图增加次数", "", self.text(event)).strip()
+        raw = event.message_str.strip()
         parts = raw.split()
         if not parts or not parts[0].isdigit() or int(parts[0]) <= 0:
             yield event.plain_result("唔...充值的次数必须是正整数才行呀！✨")
@@ -557,7 +557,7 @@ class PaintingPlugin(Star):
         await self.set_usage_count(key, current + count)
         yield event.plain_result(f"好耶！{self.bot_name}已经为 {label} 增加了 {count} 次魔法✨\n🎁 当前剩余：{current + count} 次哟~ 💖")
 
-    @filter.regex(r"^#绘图查询(所有|全部)次数$")
+    @filter.command("绘图查询所有次数", alias=["绘图查询全部次数"])
     async def query_all_counts(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
@@ -576,7 +576,7 @@ class PaintingPlugin(Star):
             lines.append(f"...以及其他 {len(items) - 80} 个目标")
         yield event.plain_result("\n".join(lines))
 
-    @filter.regex(r"^#绘图删除(所有|全部)次数$")
+    @filter.command("绘图删除所有次数", alias=["绘图删除全部次数"])
     async def delete_all_counts(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
@@ -584,12 +584,12 @@ class PaintingPlugin(Star):
         await self.put_counts({})
         yield event.plain_result("✅ 已清空所有绘图次数记录。")
 
-    @filter.regex(r"^#绘图删除次数(?:\s+(.+))?$")
+    @filter.command("绘图删除次数")
     async def delete_usage_count(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        raw = re.sub(r"^#绘图删除次数", "", self.text(event)).strip()
+        raw = event.message_str.strip()
         if raw.lower().startswith("u") and re.search(r"\d+", raw):
             uid = re.search(r"\d+", raw).group(0)  # type: ignore[union-attr]
             key, label = f"user_{uid}", f"用户 {uid}"
@@ -606,14 +606,14 @@ class PaintingPlugin(Star):
             await self.put_counts(data)
         yield event.plain_result(f"✅ 已删除 {label} 的绘图次数记录。")
 
-    @filter.regex(r"^#bnn(\d*)\s+([\s\S]+)$")
+    @filter.regex(r"^[/#!]bnn(\d*)\s+([\s\S]+)$")
     async def make_bnn(self, event: AstrMessageEvent):
         api_err = self.check_api_key()
         if api_err:
             yield event.plain_result(api_err)
             return
         msg = self.text(event)
-        match = re.match(r"^#bnn(\d*)\s+([\s\S]+)$", msg)
+        match = re.match(r"^[/#!]bnn(\d*)\s+([\s\S]+)$", msg)
         if not match:
             yield event.plain_result("格式不对啦！正确咒语是：#bnn <提示词> [图片] 或 #bnn3 <提示词> 生成多张 🪄")
             return
@@ -641,7 +641,7 @@ class PaintingPlugin(Star):
             yield event.plain_result(f"收到！{self.bot_name}正在生成 {gen_count} 张图，请耐心等待哦… 💭✨")
             await self._generate_text_to_image(event, prompt, gen_count)
 
-    @filter.regex(r"^#?(查询额度|查余额|查询api|查api)$")
+    @filter.command("查询额度", alias=["查余额", "查询api", "查api"])
     async def query_api(self, event: AstrMessageEvent):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这是主人的专属面板，{self.bot_name}不能随便给你看哦~ 🙅‍♀️")
@@ -667,11 +667,17 @@ class PaintingPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"❌ 查询失败：{exc}")
 
-    @filter.message_event()
+    @filter.regex(r"^[/#!]?.+$", priority=-1)
     async def dynamic_preset_handler(self, event: AstrMessageEvent):
         msg = self.text(event)
-        if not msg or msg.startswith("#bnn") or msg.startswith("#绘图") or msg in {"#更新焚决", "更新焚决"}:
+        if not msg:
             return
+        # 跳过已被其他 command 处理的指令
+        skip_prefixes = ("bnn", "绘图", "更新焚决", "查询额度", "查余额", "查询api", "查api")
+        stripped = re.sub(r"^[/#!]", "", msg)
+        for prefix in skip_prefixes:
+            if stripped.startswith(prefix):
+                return
         if not self.preset_reg:
             return
         match = self.preset_reg.match(msg)
