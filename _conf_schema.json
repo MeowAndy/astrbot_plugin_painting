@@ -74,6 +74,12 @@
     "default": "菲比",
     "hint": "回复消息中使用的角色名"
   },
+  "master_ids": {
+    "type": "string",
+    "description": "管理员/主人 ID 列表",
+    "default": "",
+    "hint": "多个 ID 用英文逗号、空格或换行分隔；用于兼容 AstrBot 平台权限字段不可用的情况"
+  },
   "balance_base_url": {
     "type": "string",
     "description": "余额查询 API 基础地址（可选）",
