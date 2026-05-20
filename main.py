@@ -689,18 +689,78 @@ class PaintingPlugin(Star):
             f"#查询额度 / #查余额 - 查询 API 状态（需要配置 balance_base_url）"
         )
 
-    @filter.command("绘图查询次数")
+    def strip_command_body(self, msg: str, *commands: str) -> Optional[str]:
+        msg = (msg or "").strip()
+        prefixes = {"", self.command_prefix, "#", "/", "!"}
+        for prefix in prefixes:
+            for command in commands:
+                full = f"{prefix}{command}"
+                if msg == full:
+                    return ""
+                if msg.startswith(full):
+                    return msg[len(full):].strip()
+        return None
+
+    def at_target_user(self, event: AstrMessageEvent) -> Optional[str]:
+        msg_obj = getattr(event, "message_obj", None)
+        chain = getattr(msg_obj, "message", None) or getattr(event, "message_chain", None) or []
+        try:
+            iterable = list(chain)
+        except Exception:
+            iterable = []
+        for comp in iterable:
+            if isinstance(comp, dict):
+                typ = str(comp.get("type", "")).lower()
+                data = comp.get("data") if isinstance(comp.get("data"), dict) else comp
+                if typ == "at" or "at" in typ:
+                    qq = data.get("qq") or data.get("user_id") or data.get("id")
+                    if qq and str(qq).lower() != "all":
+                        return str(qq)
+                continue
+            typ = str(getattr(comp, "type", "") or getattr(comp, "__class__", type(comp)).__name__).lower()
+            if "at" in typ:
+                qq = getattr(comp, "qq", None) or getattr(comp, "user_id", None) or getattr(comp, "id", None)
+                if qq and str(qq).lower() != "all":
+                    return str(qq)
+        return None
+
+    def parse_usage_target(self, event: AstrMessageEvent, raw: str, allow_default: bool = True) -> Tuple[Optional[str], str]:
+        at_uid = self.at_target_user(event)
+        if at_uid:
+            return f"user_{at_uid}", f"用户 {at_uid}"
+
+        raw = (raw or "").strip()
+        if raw:
+            first = raw.split()[0]
+            if first.lower().startswith("u"):
+                uid_match = re.search(r"\d+", first)
+                if uid_match:
+                    uid = uid_match.group(0)
+                    return f"user_{uid}", f"用户 {uid}"
+            gid_match = re.search(r"\d+", first)
+            if gid_match:
+                gid = gid_match.group(0)
+                return gid, f"群 {gid}"
+
+        if allow_default:
+            if self.is_group(event):
+                return self.usage_group_id(event), "本群"
+            return self.usage_user_id(event), "你(专属)"
+        return None, ""
+
+    @filter.regex(r"^.{0,10}绘图查询次数.*$")
     async def query_usage_count(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self.strip_command_body(self.text(event), "绘图查询次数")
+        if raw is None:
+            return
         stats = await self.daily_stats()
         target_id = None
         label = ""
-        if raw and self.is_admin(event):
-            num = re.search(r"\d+", raw)
-            if raw.lower().startswith("u") and num:
-                target_id, label = f"user_{num.group(0)}", f"用户 {num.group(0)}"
-            elif num:
-                target_id, label = num.group(0), f"群 {num.group(0)}"
+        at_uid = self.at_target_user(event)
+        if at_uid:
+            target_id, label = f"user_{at_uid}", f"用户 {at_uid}"
+        elif self.is_admin(event) and raw:
+            target_id, label = self.parse_usage_target(event, raw, allow_default=False)
         if not target_id:
             if self.is_group(event):
                 gid = self.usage_group_id(event)
@@ -721,34 +781,33 @@ class PaintingPlugin(Star):
             f"🏆 {self.bot_name}历史总共作画：{stats.get('historyTotal', 0)}张"
         )
 
-    @filter.command("绘图增加次数")
+    @filter.regex(r"^.{0,10}绘图增加次数.*$")
     async def add_usage_count(self, event: AstrMessageEvent):
+        raw = self.strip_command_body(self.text(event), "绘图增加次数")
+        if raw is None:
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        raw = event.message_str.strip()
         parts = raw.split()
         if not parts or not parts[0].isdigit() or int(parts[0]) <= 0:
             yield event.plain_result("唔...充值的次数必须是正整数才行呀！✨")
             return
         count = int(parts[0])
-        target = parts[1] if len(parts) > 1 else ""
-        if target.lower().startswith("u") and re.search(r"\d+", target):
-            uid = re.search(r"\d+", target).group(0)  # type: ignore[union-attr]
-            key, label = f"user_{uid}", f"用户 {uid}"
-        elif re.search(r"\d+", target):
-            gid = re.search(r"\d+", target).group(0)  # type: ignore[union-attr]
-            key, label = gid, f"群 {gid}"
-        elif self.is_group(event):
-            key, label = self.usage_group_id(event), "本群"
-        else:
-            key, label = self.usage_user_id(event), "你(专属)"
+        target_raw = " ".join(parts[1:])
+        key, label = self.parse_usage_target(event, target_raw, allow_default=True)
+        if not key:
+            yield event.plain_result(f"{self.bot_name}不知道你要给谁充值，请指定一下哦：#绘图增加次数 <数量> <群号/uQQ号/@某人> ✨")
+            return
         current = await self.get_usage_count(key)
         await self.set_usage_count(key, current + count)
         yield event.plain_result(f"好耶！{self.bot_name}已经为 {label} 增加了 {count} 次魔法✨\n🎁 当前剩余：{current + count} 次哟~ 💖")
 
-    @filter.command("绘图查询所有次数", alias=["绘图查询全部次数"])
+    @filter.regex(r"^.{0,10}绘图查询(所有|全部)次数$")
     async def query_all_counts(self, event: AstrMessageEvent):
+        raw = self.strip_command_body(self.text(event), "绘图查询所有次数", "绘图查询全部次数")
+        if raw is None:
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
@@ -766,35 +825,36 @@ class PaintingPlugin(Star):
             lines.append(f"...以及其他 {len(items) - 80} 个目标")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("绘图删除所有次数", alias=["绘图删除全部次数"])
+    @filter.regex(r"^.{0,10}绘图删除(所有|全部)次数$")
     async def delete_all_counts(self, event: AstrMessageEvent):
+        raw = self.strip_command_body(self.text(event), "绘图删除所有次数", "绘图删除全部次数")
+        if raw is None:
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
         await self.put_counts({})
         yield event.plain_result("✅ 已清空所有绘图次数记录。")
 
-    @filter.command("绘图删除次数")
+    @filter.regex(r"^.{0,10}绘图删除次数.*$")
     async def delete_usage_count(self, event: AstrMessageEvent):
+        raw = self.strip_command_body(self.text(event), "绘图删除次数")
+        if raw is None:
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        raw = event.message_str.strip()
-        if raw.lower().startswith("u") and re.search(r"\d+", raw):
-            uid = re.search(r"\d+", raw).group(0)  # type: ignore[union-attr]
-            key, label = f"user_{uid}", f"用户 {uid}"
-        elif re.search(r"\d+", raw):
-            gid = re.search(r"\d+", raw).group(0)  # type: ignore[union-attr]
-            key, label = gid, f"群 {gid}"
-        elif self.is_group(event):
-            key, label = self.usage_group_id(event), "本群"
-        else:
-            key, label = self.usage_user_id(event), "你(专属)"
+        key, label = self.parse_usage_target(event, raw, allow_default=self.is_group(event))
+        if not key:
+            yield event.plain_result(f"{self.bot_name}不知道你要清零谁，请指定一下哦：#绘图删除次数 <群号/uQQ号/@某人> 🧹")
+            return
         data = await self.get_counts()
         if key in data:
             data.pop(key, None)
             await self.put_counts(data)
-        yield event.plain_result(f"✅ 已删除 {label} 的绘图次数记录。")
+            yield event.plain_result(f"呼~ {self.bot_name}已经把 {label} 的魔法次数清空啦！🧹")
+        else:
+            yield event.plain_result(f"咦？{label} 还没有{self.bot_name}的次数记录呢 🐾")
 
     @filter.regex(r"^.{1,10}bnn(\d*)\s+([\s\S]+)$")
     async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
