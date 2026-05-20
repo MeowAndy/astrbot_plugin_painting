@@ -43,6 +43,8 @@ class PaintingPlugin(Star):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.image_dir = self.data_dir / "generated_images"
         self.image_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_image_dir = self.data_dir / "temp_images"
+        self.temp_image_dir.mkdir(parents=True, exist_ok=True)
         self.presets: List[Dict[str, Any]] = []
         self.preset_reg: Optional[re.Pattern[str]] = None
         asyncio.create_task(self._init_presets())
@@ -172,12 +174,20 @@ class PaintingPlugin(Star):
         await event.send(event.plain_result(text))
 
     async def send_images(self, event: AstrMessageEvent, image_paths: Iterable[Path], text: str = "") -> None:
+        paths = list(image_paths)
         chain: List[Any] = []
-        for path in image_paths:
+        for path in paths:
             chain.append(Comp.Image.fromFileSystem(str(path)))
         if text:
             chain.append(Comp.Plain(text))
         await event.send(event.chain_result(chain))
+        # 关闭存图时生成的是临时发送文件，发送后清理；开启存图时文件位于 generated_images，不删除。
+        for path in paths:
+            try:
+                if path.parent == self.temp_image_dir and path.exists():
+                    path.unlink()
+            except Exception:
+                pass
 
     # =========================
     # KV storage
@@ -234,9 +244,12 @@ class PaintingPlugin(Star):
         today = date.today().isoformat()
         data = await self.kv_get("daily_stats", {})
         if not isinstance(data, dict) or not data:
-            data = {"date": today, "totalGenerated": 0, "historyTotal": 0, "lastReset": datetime.now().isoformat()}
+            data = {"date": today, "totalGenerated": 0, "historyTotal": 0, "lastReset": datetime.now().isoformat(), "daily": {}}
             await self.kv_put("daily_stats", data)
             return data
+        data.setdefault("daily", {})
+        if not isinstance(data.get("daily"), dict):
+            data["daily"] = {}
         if data.get("date") != today:
             data["historyTotal"] = int(data.get("historyTotal", 0)) + int(data.get("totalGenerated", 0))
             data["date"] = today
@@ -245,13 +258,23 @@ class PaintingPlugin(Star):
             await self.kv_put("daily_stats", data)
         data.setdefault("historyTotal", 0)
         data.setdefault("totalGenerated", 0)
+        data["daily"].setdefault(today, int(data.get("totalGenerated", 0)))
         return data
 
     async def increase_today_count(self, n: int = 1) -> int:
+        today = date.today().isoformat()
         data = await self.daily_stats()
         data["totalGenerated"] = int(data.get("totalGenerated", 0)) + n
+        daily = data.setdefault("daily", {})
+        daily[today] = int(daily.get(today, 0)) + n
         await self.kv_put("daily_stats", data)
         return int(data["totalGenerated"])
+
+    async def save_img_enabled(self) -> bool:
+        return bool(await self.kv_get("save_img_enabled", False))
+
+    async def set_save_img_enabled(self, enabled: bool) -> None:
+        await self.kv_put("save_img_enabled", bool(enabled))
 
     # =========================
     # Presets
@@ -429,7 +452,9 @@ class PaintingPlugin(Star):
         content, ext = await self.download_bytes(item)
         if ext.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             ext = ".png"
-        path = self.image_dir / f"{prefix}_{int(time.time() * 1000)}{ext}"
+        target_dir = self.image_dir if await self.save_img_enabled() else self.temp_image_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{prefix}_{int(time.time() * 1000)}{ext}"
         path.write_bytes(content)
         return path
 
@@ -680,10 +705,14 @@ class PaintingPlugin(Star):
             f"{p}bnn3 <提示词> - 一次生成 3 张（最多 {self.bnn_max_count} 张）\n\n"
             f"📌 次数：\n"
             f"#绘图查询次数 - 查询群/个人魔法余量\n"
-            f"#绘图增加次数 <数量> [uQQ号/群号] - 主人专属\n"
+            f"#绘图增加次数 <数量> [@某人/uQQ号/群号] - 主人专属\n"
             f"#绘图查询所有次数 - 主人专属\n"
-            f"#绘图删除次数 [uQQ号/群号] - 主人专属\n"
-            f"#绘图删除所有次数 - 主人专属\n\n"
+            f"#绘图删除次数 [@某人/uQQ号/群号] - 主人专属\n"
+            f"#绘图删除所有次数 - 主人专属\n"
+            f"#开启bnn存图 - 主人专属，开启本地存图\n"
+            f"#关闭bnn存图 - 主人专属，关闭本地存图\n\n"
+            f"📌 统计：\n"
+            f"#排行bnn - 查看本周每日作画统计排行\n\n"
             f"📌 维护：\n"
             f"#更新焚决 - 更新云端预设\n"
             f"#查询额度 / #查余额 - 查询 API 状态（需要配置 balance_base_url）"
@@ -896,8 +925,68 @@ class PaintingPlugin(Star):
             yield event.plain_result(f"收到！{self.bot_name}正在生成 {gen_count} 张图，请耐心等待哦… 💭✨")
             await self._generate_text_to_image(event, prompt, gen_count)
 
-    @filter.command("查询额度", alias=["查余额", "查询api", "查api"])
+    def is_simple_prefixed_command(self, msg: str, *commands: str) -> bool:
+        return self.strip_command_body(msg, *commands) == ""
+
+    @filter.regex(r"^.{0,10}(开启|关闭)bnn存图$")
+    async def toggle_bnn_save(self, event: AstrMessageEvent):
+        msg = self.text(event)
+        if not self.is_simple_prefixed_command(msg, "开启bnn存图", "关闭bnn存图"):
+            return
+        if not self.is_admin(event):
+            yield event.plain_result("哼唧，只有主人才能切换存图哦~ 🙅‍♀️")
+            return
+        enabled = "开启bnn存图" in msg
+        await self.set_save_img_enabled(enabled)
+        if enabled:
+            self.image_dir.mkdir(parents=True, exist_ok=True)
+            yield event.plain_result("✅ 已开启bnn存图！生成的图片会保存到本地 data/plugins/astrbot_plugin_painting/generated_images/ 目录 📁")
+        else:
+            yield event.plain_result("✅ 已关闭bnn存图！后续生成的图片不再长期保存到本地 🚫")
+
+    @filter.regex(r"^.{0,10}排行bnn$")
+    async def weekly_ranking(self, event: AstrMessageEvent):
+        if not self.is_simple_prefixed_command(self.text(event), "排行bnn"):
+            return
+        stats = await self.daily_stats()
+        daily = stats.get("daily", {}) if isinstance(stats.get("daily"), dict) else {}
+        today = date.today()
+        monday = today.fromordinal(today.toordinal() - today.weekday())
+        week_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        week_data = []
+        total_week = 0
+        max_day = (0, "")
+        for i in range(7):
+            d = monday.fromordinal(monday.toordinal() + i)
+            if d > today:
+                break
+            key = d.isoformat()
+            count = int(daily.get(key, 0))
+            week_data.append((key, week_labels[i], count))
+            total_week += count
+            if count > max_day[0]:
+                max_day = (count, f"{week_labels[i]} ({key})")
+        if not week_data or total_week == 0:
+            yield event.plain_result(f"📊 本周还没有任何作画记录哦~ 快来让{self.bot_name}施展魔法吧！✨")
+            return
+        max_count = max(max_day[0], 1)
+        bar_max_len = 12
+        lines = [f"📊 {self.bot_name}本周作画排行榜"]
+        chart = []
+        for key, label, count in week_data:
+            bar_len = round((count / max_count) * bar_max_len) if max_count else 0
+            bar = "█" * bar_len + "░" * (bar_max_len - bar_len)
+            suffix = " 👑" if count == max_day[0] and count > 0 else (" 🔵" if key == today.isoformat() else "")
+            chart.append(f"📅 {key} ({label})：{bar} {count}张{suffix}")
+        avg = total_week / len(week_data)
+        lines.append("\n".join(chart))
+        lines.append(f"━━━━━━━━\n🏆 本周总计：{total_week} 张\n📈 日均：{avg:.1f} 张\n🔥 最高日：{max_day[1]} {max_day[0]} 张")
+        yield event.plain_result("\n\n".join(lines))
+
+    @filter.regex(r"^.{0,10}(查询额度|查余额|查询api|查api)$")
     async def query_api(self, event: AstrMessageEvent):
+        if not self.is_simple_prefixed_command(self.text(event), "查询额度", "查余额", "查询api", "查api"):
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这是主人的专属面板，{self.bot_name}不能随便给你看哦~ 🙅‍♀️")
             return
@@ -933,7 +1022,7 @@ class PaintingPlugin(Star):
             return
         after_prefix = msg[len(prefix):]
         # 跳过已被其他 command 处理的指令
-        skip_prefixes = ("bnn", "绘图", "更新焚决", "更新焚诀", "查询额度", "查余额", "查询api", "查api")
+        skip_prefixes = ("bnn", "绘图", "更新焚决", "更新焚诀", "查询额度", "查余额", "查询api", "查api", "开启bnn存图", "关闭bnn存图", "排行bnn")
         for sp in skip_prefixes:
             if after_prefix.startswith(sp):
                 return
