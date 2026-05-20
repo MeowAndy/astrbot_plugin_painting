@@ -64,9 +64,9 @@
   },
   "preset_json_url": {
     "type": "string",
-    "description": "预设 JSON 远程地址",
+    "description": "预设 JSON 远程地址（fallback 源）",
     "default": "https://ht.pippi.top/pippi.json",
-    "hint": "云端预设（焚决）的 JSON 下载地址"
+    "hint": "插件会优先从 GitHub 拉取焚决，失败后回退到此地址，再失败用内置文件"
   },
   "bot_name": {
     "type": "string",

@@ -19,6 +19,7 @@ import astrbot.api.message_components as Comp
 
 
 PLUGIN_ID = "astrbot_plugin_painting"
+GITHUB_PRESET_URL = "https://raw.githubusercontent.com/MeowAndy/astrbot_plugin_painting/master/presets/ht.json"
 
 
 @register(
@@ -274,24 +275,49 @@ class PaintingPlugin(Star):
         self.preset_reg = re.compile(rf"^({'|'.join(keywords)})(?:@(\d+)|(\d+))?$", re.S) if keywords else None
 
     async def fetch_presets(self) -> bool:
-        url = str(self.cfg("preset_json_url", "https://ht.pippi.top/pippi.json")).strip()
-        if not url:
-            return False
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.get(url) as resp:
-                    if resp.status >= 400:
-                        raise RuntimeError(f"HTTP {resp.status}")
-                    data = await resp.json(content_type=None)
-            if not isinstance(data, list):
-                raise RuntimeError("远程预设不是数组")
-            self.presets = data
-            self.rebuild_preset_regex()
-            await self.kv_put("presets", data)
-            return True
-        except Exception as exc:
-            print(f"[Painting] 下载预设失败: {exc}")
-            return False
+        """多源拉取焚决预设：GitHub → 用户配置 URL → 内置文件。"""
+        user_url = str(self.cfg("preset_json_url", "https://ht.pippi.top/pippi.json")).strip()
+        sources = [
+            ("GitHub", GITHUB_PRESET_URL),
+        ]
+        if user_url:
+            sources.append(("云端(pippi)", user_url))
+
+        for name, url in sources:
+            try:
+                print(f"[Painting] 正在从 {name} 拉取焚决预设...")
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    async with session.get(url) as resp:
+                        if resp.status >= 400:
+                            raise RuntimeError(f"HTTP {resp.status}")
+                        data = await resp.json(content_type=None)
+                if not isinstance(data, list) or not data:
+                    raise RuntimeError("数据格式错误或为空")
+                self.presets = data
+                self.rebuild_preset_regex()
+                await self.kv_put("presets", data)
+                print(f"[Painting] ✅ 从 {name} 更新成功，已加载 {len(self.presets)} 条焚决预设。")
+                return True
+            except Exception as exc:
+                print(f"[Painting] ⚠️ 从 {name} 拉取失败: {exc}，尝试下一个源...")
+
+        # 所有远程源失败，尝试内置文件
+        builtin = Path(__file__).parent / "presets" / "ht.json"
+        if builtin.exists():
+            try:
+                import json as _json
+                data = _json.loads(builtin.read_text(encoding="utf-8"))
+                if isinstance(data, list) and data:
+                    self.presets = data
+                    self.rebuild_preset_regex()
+                    await self.kv_put("presets", data)
+                    print(f"[Painting] ✅ 远程源均不可用，已从内置预设加载 {len(self.presets)} 条焚决。")
+                    return True
+            except Exception as exc:
+                print(f"[Painting] ❎ 读取内置预设也失败: {exc}")
+
+        print("[Painting] ❎ 所有焚决预设源均不可用！")
+        return False
 
     # =========================
     # HTTP / image helpers
@@ -517,12 +543,12 @@ class PaintingPlugin(Star):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，只有主人才能更新{self.bot_name}的魔法书哦~ 🙅‍♀️")
             return
-        yield event.plain_result("正在从云端拉取最新魔法预设，请稍等...")
+        yield event.plain_result("正在拉取最新焚决预设（GitHub → 云端 → 内置），请稍等...")
         ok = await self.fetch_presets()
         if ok:
             yield event.plain_result(f"✅ 魔法书更新成功！\n已加载 {len(self.presets)} 条神奇咒语。✨")
         else:
-            yield event.plain_result("更新失败啦，请查看后台控制台日志。🥺")
+            yield event.plain_result("更新失败啦，所有源均不可用，请查看后台控制台日志。🥺")
 
     @filter.command("绘图帮助")
     async def show_help(self, event: AstrMessageEvent):
