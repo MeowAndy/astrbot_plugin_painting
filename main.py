@@ -648,8 +648,22 @@ class PaintingPlugin(Star):
         else:
             yield event.plain_result("更新失败啦，所有源均不可用，请查看后台控制台日志。🥺")
 
-    @filter.command("绘图帮助")
+    def is_help_command(self, msg: str) -> bool:
+        msg = (msg or "").strip()
+        if not msg:
+            return False
+        target = "绘图帮助"
+        if msg == target:
+            return True
+        for prefix in {self.command_prefix, "#", "/", "!"}:
+            if prefix and msg.startswith(prefix) and msg[len(prefix):].strip() == target:
+                return True
+        return False
+
+    @filter.regex(r"^.{0,10}绘图帮助$")
     async def show_help(self, event: AstrMessageEvent):
+        if not self.is_help_command(self.text(event)):
+            return
         preset_lines = []
         for idx, preset in enumerate(self.presets, 1):
             keys = " / ".join(str(x) for x in preset.get("keywords", []) or [])
