@@ -753,13 +753,18 @@ class PaintingPlugin(Star):
     def strip_command_body(self, msg: str, *commands: str) -> Optional[str]:
         msg = (msg or "").strip()
         prefixes = {"", "#", "/", "!", *self.painting_prefix_candidates()}
-        for prefix in prefixes:
-            for command in commands:
+        for command in sorted(commands, key=len, reverse=True):
+            # 先处理标准形式：前缀 + 命令 在消息开头。
+            for prefix in prefixes:
                 full = f"{prefix}{command}"
                 if msg == full:
                     return ""
                 if msg.startswith(full):
                     return msg[len(full):].strip()
+            # 再兜底处理平台把 @/Reply/CQ 段插到前面或文本前缀异常的情况：只要全文包含命令就截取命令后的参数。
+            idx = msg.find(command)
+            if idx >= 0:
+                return msg[idx + len(command):].strip()
         return None
 
     def at_target_user(self, event: AstrMessageEvent) -> Optional[str]:
@@ -863,7 +868,7 @@ class PaintingPlugin(Star):
             return self.usage_user_id(event), "你(专属)"
         return None, ""
 
-    @filter.regex(r"^.{0,10}绘图查询次数.*$")
+    @filter.regex(r"^[\s\S]*绘图查询次数[\s\S]*$")
     async def query_usage_count(self, event: AstrMessageEvent):
         raw = self.strip_command_body(self.text(event), "绘图查询次数")
         if raw is None:
@@ -896,7 +901,7 @@ class PaintingPlugin(Star):
             f"🏆 {self.bot_name}历史总共作画：{stats.get('historyTotal', 0)}张"
         )
 
-    @filter.regex(r"^.{0,10}绘图增加次数.*$")
+    @filter.regex(r"^[\s\S]*绘图增加次数[\s\S]*$")
     async def add_usage_count(self, event: AstrMessageEvent):
         raw = self.strip_command_body(self.text(event), "绘图增加次数")
         if raw is None:
@@ -916,7 +921,7 @@ class PaintingPlugin(Star):
         await self.set_usage_count(key, current + count)
         yield event.plain_result(f"好耶！{self.bot_name}已经为 {label} 增加了 {count} 次魔法✨\n🎁 当前剩余：{current + count} 次哟~ 💖")
 
-    @filter.regex(r"^.{0,10}绘图查询(所有|全部)次数$")
+    @filter.regex(r"^[\s\S]*绘图查询(所有|全部)次数[\s\S]*$")
     async def query_all_counts(self, event: AstrMessageEvent):
         raw = self.strip_command_body(self.text(event), "绘图查询所有次数", "绘图查询全部次数")
         if raw is None:
@@ -938,7 +943,7 @@ class PaintingPlugin(Star):
             lines.append(f"...以及其他 {len(items) - 80} 个目标")
         yield event.plain_result("\n".join(lines))
 
-    @filter.regex(r"^.{0,10}绘图删除(所有|全部)次数$")
+    @filter.regex(r"^[\s\S]*绘图删除(所有|全部)次数[\s\S]*$")
     async def delete_all_counts(self, event: AstrMessageEvent):
         raw = self.strip_command_body(self.text(event), "绘图删除所有次数", "绘图删除全部次数")
         if raw is None:
@@ -949,7 +954,7 @@ class PaintingPlugin(Star):
         await self.put_counts({})
         yield event.plain_result("✅ 已清空所有绘图次数记录。")
 
-    @filter.regex(r"^.{0,10}绘图删除次数.*$")
+    @filter.regex(r"^[\s\S]*绘图删除次数[\s\S]*$")
     async def delete_usage_count(self, event: AstrMessageEvent):
         raw = self.strip_command_body(self.text(event), "绘图删除次数")
         if raw is None:
