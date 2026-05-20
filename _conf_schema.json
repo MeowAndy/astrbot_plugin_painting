@@ -85,5 +85,11 @@
     "description": "余额查询 API 基础地址（可选）",
     "default": "",
     "hint": "留空则禁用余额查询功能"
+  },
+  "command_prefix": {
+    "type": "string",
+    "description": "画图指令前缀（唤醒词）",
+    "default": "#",
+    "hint": "bnn/预设指令的前缀符号，例如 # / ! / 菲比 等，修改后所有画图指令都会跟随变化"
   }
 }

@@ -72,6 +72,12 @@ class PaintingPlugin(Star):
             return 240
 
     @property
+    def command_prefix(self) -> str:
+        """画图指令前缀（唤醒词），可在 Web 面板修改。"""
+        raw = str(self.cfg("command_prefix", "#")).strip()
+        return raw if raw else "#"
+
+    @property
     def bnn_max_count(self) -> int:
         try:
             return max(1, int(self.cfg("bnn_max_count", 5)))
@@ -264,7 +270,8 @@ class PaintingPlugin(Star):
             for key in preset.get("keywords", []) or []:
                 if key:
                     keywords.append(re.escape(str(key)))
-        self.preset_reg = re.compile(rf"^#?({'|'.join(keywords)})(?:@(\d+)|(\d+))?$", re.S) if keywords else None
+        # 不再在 regex 里硬编码前缀，匹配去掉前缀后的纯关键词部分
+        self.preset_reg = re.compile(rf"^({'|'.join(keywords)})(?:@(\d+)|(\d+))?$", re.S) if keywords else None
 
     async def fetch_presets(self) -> bool:
         url = str(self.cfg("preset_json_url", "https://ht.pippi.top/pippi.json")).strip()
@@ -525,12 +532,14 @@ class PaintingPlugin(Star):
             if keys:
                 preset_lines.append(f"{idx}. #{keys}")
         preset_text = "\n".join(preset_lines) if preset_lines else "暂无本地预设，请发送 #更新焚决 获取。"
+        p = self.command_prefix
         yield event.plain_result(
             f"🎨 {self.bot_name} Painting 魔法使用帮助：\n\n"
+            f"📌 当前指令前缀（唤醒词）：{p}\n\n"
             f"📌 基础咒语（会消耗群魔法/个人魔法）：\n{preset_text}\n\n"
             f"📌 创作咒语：\n"
-            f"#bnn <提示词> [图片] - 看图作画\n"
-            f"#bnn3 <提示词> - 一次生成 3 张（最多 {self.bnn_max_count} 张）\n\n"
+            f"{p}bnn <提示词> [图片] - 看图作画\n"
+            f"{p}bnn3 <提示词> - 一次生成 3 张（最多 {self.bnn_max_count} 张）\n\n"
             f"📌 次数：\n"
             f"#绘图查询次数 - 查询群/个人魔法余量\n"
             f"#绘图增加次数 <数量> [uQQ号/群号] - 主人专属\n"
@@ -649,16 +658,21 @@ class PaintingPlugin(Star):
             await self.put_counts(data)
         yield event.plain_result(f"✅ 已删除 {label} 的绘图次数记录。")
 
-    @filter.regex(r"^[/#!]bnn(\d*)\s+([\s\S]+)$")
+    @filter.regex(r"^.{1,10}bnn(\d*)\s+([\s\S]+)$")
     async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
+        msg = self.text(event)
+        prefix = self.command_prefix
+        # 验证消息确实以配置的前缀开头
+        if not msg.startswith(prefix):
+            return
+        # 去掉前缀后检查是否是 bnn 指令
+        after_prefix = msg[len(prefix):]
+        match = re.match(r"^bnn(\d*)\s+([\s\S]+)$", after_prefix)
+        if not match:
+            return
         api_err = self.check_api_key()
         if api_err:
             yield event.plain_result(api_err)
-            return
-        msg = self.text(event)
-        match = re.match(r"^[/#!]bnn(\d*)\s+([\s\S]+)$", msg)
-        if not match:
-            yield event.plain_result("格式不对啦！正确咒语是：#bnn <提示词> [图片] 或 #bnn3 <提示词> 生成多张 🪄")
             return
         gen_count = int(match.group(1) or 1)
         if gen_count < 1:
@@ -710,20 +724,25 @@ class PaintingPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"❌ 查询失败：{exc}")
 
-    @filter.regex(r"^[/#!]?.+$", priority=-1)
+    @filter.regex(r"^.+$", priority=-1)
     async def dynamic_preset_handler(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         if not msg:
             return
+        prefix = self.command_prefix
+        # 必须以配置的前缀开头
+        if not msg.startswith(prefix):
+            return
+        after_prefix = msg[len(prefix):]
         # 跳过已被其他 command 处理的指令
         skip_prefixes = ("bnn", "绘图", "更新焚决", "查询额度", "查余额", "查询api", "查api")
-        stripped = re.sub(r"^[/#!]", "", msg)
-        for prefix in skip_prefixes:
-            if stripped.startswith(prefix):
+        for sp in skip_prefixes:
+            if after_prefix.startswith(sp):
                 return
         if not self.preset_reg:
             return
-        match = self.preset_reg.match(msg)
+        # 预设 regex 匹配去掉前缀后的内容
+        match = self.preset_reg.match(after_prefix)
         if not match:
             return
         api_err = self.check_api_key()
