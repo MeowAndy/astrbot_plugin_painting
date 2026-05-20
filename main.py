@@ -711,10 +711,20 @@ class PaintingPlugin(Star):
                 return True
         return False
 
-    @filter.regex(r"^.{0,10}绘图帮助$")
-    async def show_help(self, event: AstrMessageEvent):
-        if not self.is_help_command(self.text(event)):
-            return
+    async def send_forward_texts(self, event: AstrMessageEvent, parts: List[str], title: str = "魔法手册") -> bool:
+        """尽量用合并转发/合并消息发送；失败返回 False 由调用方降级普通文本。"""
+        try:
+            nodes = []
+            bot_uin = self.sender_id(event) or "0"
+            for text in parts:
+                nodes.append(Comp.Node(content=[Comp.Plain(text)], name=self.bot_name, uin=bot_uin))
+            await event.send(event.chain_result([Comp.Nodes(nodes=nodes)]))
+            return True
+        except Exception as exc:
+            print(f"[Painting] 合并消息发送失败，降级普通文本：{exc}")
+            return False
+
+    def build_help_parts(self) -> List[str]:
         preset_lines = []
         for idx, preset in enumerate(self.presets, 1):
             keys = " / ".join(str(x) for x in preset.get("keywords", []) or [])
@@ -722,27 +732,23 @@ class PaintingPlugin(Star):
                 preset_lines.append(f"{idx}. #{keys}")
         preset_text = "\n".join(preset_lines) if preset_lines else "暂无本地预设，请发送 #更新焚决 获取。"
         p = self.command_prefix
-        yield event.plain_result(
-            f"🎨 {self.bot_name} Painting 魔法使用帮助：\n\n"
-            f"📌 当前指令前缀（唤醒词）：{p}\n\n"
-            f"📌 基础咒语（会消耗群魔法/个人魔法）：\n{preset_text}\n\n"
-            f"📌 创作咒语：\n"
-            f"{p}bnn <提示词> [图片] - 看图作画\n"
-            f"{p}bnn3 <提示词> - 一次生成 3 张（最多 {self.bnn_max_count} 张）\n\n"
-            f"📌 次数：\n"
-            f"#绘图查询次数 - 查询群/个人魔法余量\n"
-            f"#绘图增加次数 <数量> [@某人/uQQ号/群号] - 主人专属\n"
-            f"#绘图查询所有次数 - 主人专属\n"
-            f"#绘图删除次数 [@某人/uQQ号/群号] - 主人专属\n"
-            f"#绘图删除所有次数 - 主人专属\n"
-            f"#开启bnn存图 - 主人专属，开启本地存图\n"
-            f"#关闭bnn存图 - 主人专属，关闭本地存图\n\n"
-            f"📌 统计：\n"
-            f"#排行bnn - 查看本周每日作画统计排行\n\n"
-            f"📌 维护：\n"
-            f"#更新焚决 - 更新云端预设\n"
-            f"#查询额度 / #查余额 - 查询 API 状态（需要配置 balance_base_url）"
-        )
+        return [
+            f"🎨 {self.bot_name}Painting魔法使用帮助：",
+            f"📌 当前画图前缀（独立唤醒词）：{p}\n填 xy 时直接发送 xybnn / xy预设，不需要再加 #。",
+            f"📌 基础咒语（读取自焚决，会消耗群魔法/个人魔法）：\n{preset_text}",
+            f"📌 创作咒语：\n{p}bnn <提示词> [图片] - {self.bot_name}看图作画\n{p}bnn <提示词> - {self.bot_name}闭眼想象作画（纯文生图）\n{p}bnn3 <提示词> - 一次生成 3 张（最多 {self.bnn_max_count} 张）\n\n📌 次数与魔法机制：\n优先消耗【群次数】。如果群次数不足，{self.bot_name}会自动检查【你的个人专属次数】哦！",
+            "📌 主人专属指令：\n#绘图更新预设 / #更新焚决 / #更新焚诀 - 拉取最新画图咒语\n#绘图增加次数 <数量> [@某人/uQQ号/群号] - 给群或个人充能\n#绘图查询/删除所有次数 - 管理全服魔法账本\n#绘图删除次数 [@某人/uQQ号/群号] - 清空某个记录\n#查询额度 / #查余额 - 查询 API 中转站余额状态\n#开启bnn存图 - 开启本地存图\n#关闭bnn存图 - 关闭本地存图（默认关闭）",
+            "📌 大家都可以用的：\n#绘图查询次数 - 看看群里和个人的魔法余量\n#排行bnn - 查看本周每日作画统计排行",
+        ]
+
+    @filter.regex(r"^.{0,10}绘图帮助$")
+    async def show_help(self, event: AstrMessageEvent):
+        if not self.is_help_command(self.text(event)):
+            return
+        parts = self.build_help_parts()
+        if await self.send_forward_texts(event, parts, f"{self.bot_name}的魔法使用帮助"):
+            return
+        yield event.plain_result("\n\n".join(parts))
 
     def strip_command_body(self, msg: str, *commands: str) -> Optional[str]:
         msg = (msg or "").strip()
@@ -778,6 +784,20 @@ class PaintingPlugin(Star):
                 if qq and str(qq).lower() != "all":
                     return str(qq)
         return None
+
+    def parse_positive_count_and_rest(self, raw: str) -> Tuple[Optional[int], str]:
+        raw = (raw or "").strip()
+        match = re.match(r"^([0-9０-９]+)", raw)
+        if not match:
+            return None, raw
+        digits = match.group(1).translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+        try:
+            count = int(digits)
+        except Exception:
+            return None, raw
+        if count <= 0:
+            return None, raw
+        return count, raw[match.end():].strip()
 
     def parse_usage_target(self, event: AstrMessageEvent, raw: str, allow_default: bool = True) -> Tuple[Optional[str], str]:
         at_uid = self.at_target_user(event)
@@ -844,12 +864,10 @@ class PaintingPlugin(Star):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        parts = raw.split()
-        if not parts or not parts[0].isdigit() or int(parts[0]) <= 0:
+        count, target_raw = self.parse_positive_count_and_rest(raw)
+        if count is None:
             yield event.plain_result("唔...充值的次数必须是正整数才行呀！✨")
             return
-        count = int(parts[0])
-        target_raw = " ".join(parts[1:])
         key, label = self.parse_usage_target(event, target_raw, allow_default=True)
         if not key:
             yield event.plain_result(f"{self.bot_name}不知道你要给谁充值，请指定一下哦：#绘图增加次数 <数量> <群号/uQQ号/@某人> ✨")
