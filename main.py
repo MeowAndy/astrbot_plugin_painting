@@ -382,10 +382,15 @@ class PaintingPlugin(Star):
     async def download_bytes(self, url: str) -> Tuple[bytes, str]:
         if url.startswith("data:image"):
             header, b64 = url.split(",", 1)
-            ext = ".png" if "png" in header else ".jpg"
+            ext = ".png" if "png" in header else ".webp" if "webp" in header else ".gif" if "gif" in header else ".jpg"
             return base64.b64decode(b64), ext
         if url.startswith("base64://"):
             return base64.b64decode(url[len("base64://") :]), ".png"
+        if url.startswith("file://"):
+            path = url[7:]
+            return Path(path).read_bytes(), Path(path).suffix or ".jpg"
+        if os.path.exists(url):
+            return Path(url).read_bytes(), Path(url).suffix or ".jpg"
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=min(self.timeout, 120))) as session:
             async with session.get(url) as resp:
                 if resp.status >= 400:
@@ -397,7 +402,15 @@ class PaintingPlugin(Star):
 
     async def url_to_data_url(self, url: str) -> str:
         content, ext = await self.download_bytes(url)
-        mime = "image/png" if ext.lower() == ".png" else "image/jpeg"
+        ext_l = ext.lower()
+        if ext_l == ".png":
+            mime = "image/png"
+        elif ext_l == ".webp":
+            mime = "image/webp"
+        elif ext_l == ".gif":
+            mime = "image/gif"
+        else:
+            mime = "image/jpeg"
         return f"data:{mime};base64,{base64.b64encode(content).decode()}"
 
     async def save_generated_image(self, item: str, prefix: str = "painting") -> Path:
@@ -446,6 +459,64 @@ class PaintingPlugin(Star):
                         images.append(url)
         return images
 
+    def _image_value_to_url(self, value: Any) -> Optional[str]:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text
+
+    def _extract_image_urls_from_component(self, comp: Any, urls: List[str], depth: int = 0) -> None:
+        """递归提取消息链中的图片，包含引用消息 Reply.chain。
+
+        AstrBot 的 aiocqhttp 适配器会把 OneBot 的 reply 段转换为 Reply 组件，
+        被引用消息的消息链放在 Reply.chain 里。之前只扫描了当前消息顶层
+        message chain，所以“引用一张图再发 #bnn/#预设”会拿不到图片。
+        """
+        if comp is None or depth > 3:
+            return
+
+        # dict 形式兼容（部分平台/旧版本可能直接保留原始 segment dict）
+        if isinstance(comp, dict):
+            typ = str(comp.get("type", "")).lower()
+            data = comp.get("data") if isinstance(comp.get("data"), dict) else comp
+            if "image" in typ:
+                image_url = data.get("image_url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                value = data.get("url") or data.get("file") or data.get("path") or image_url
+                value = self._image_value_to_url(value)
+                if value:
+                    urls.append(value)
+            # reply / node / forward 等嵌套消息链
+            for key in ("chain", "message", "messages", "nodes"):
+                nested = data.get(key) if isinstance(data, dict) else None
+                if isinstance(nested, list):
+                    for item in nested:
+                        self._extract_image_urls_from_component(item, urls, depth + 1)
+            return
+
+        typ = str(getattr(comp, "type", "") or getattr(comp, "__class__", type(comp)).__name__).lower()
+        cls_name = str(getattr(comp, "__class__", type(comp)).__name__).lower()
+
+        if "image" in typ or "image" in cls_name:
+            for attr in ("url", "file", "path", "image_url"):
+                value = getattr(comp, attr, None)
+                if isinstance(value, dict):
+                    value = value.get("url")
+                value = self._image_value_to_url(value)
+                if value:
+                    urls.append(value)
+                    break
+
+        # 重点：AstrBot Reply 组件的 chain 保存被引用消息的消息段列表。
+        for attr in ("chain", "message", "messages", "nodes"):
+            nested = getattr(comp, attr, None)
+            if isinstance(nested, list):
+                for item in nested:
+                    self._extract_image_urls_from_component(item, urls, depth + 1)
+
     def extract_incoming_image_urls(self, event: AstrMessageEvent) -> List[str]:
         urls: List[str] = []
         msg_obj = getattr(event, "message_obj", None)
@@ -455,18 +526,19 @@ class PaintingPlugin(Star):
         except Exception:
             iterable = []
         for comp in iterable:
-            typ = str(getattr(comp, "type", "") or getattr(comp, "__class__", type(comp)).__name__).lower()
-            if "image" not in typ:
-                continue
-            for attr in ("url", "file", "path", "image_url"):
-                value = getattr(comp, attr, None)
-                if value:
-                    urls.append(str(value))
-                    break
-            if isinstance(comp, dict):
-                value = comp.get("url") or comp.get("file") or comp.get("path")
-                if value:
-                    urls.append(str(value))
+            self._extract_image_urls_from_component(comp, urls)
+
+        # 再兜底扫 raw_message（适配器异常/旧版本没填 Reply.chain 时也尽量找图）。
+        raw = getattr(msg_obj, "raw_message", None)
+        raw_msg = None
+        try:
+            raw_msg = raw.get("message") if hasattr(raw, "get") else None
+        except Exception:
+            raw_msg = None
+        if isinstance(raw_msg, list):
+            for comp in raw_msg:
+                self._extract_image_urls_from_component(comp, urls)
+
         # 兜底从文本里提取 URL
         for url in re.findall(r"https?://\S+", self.text(event)):
             if re.search(r"\.(png|jpe?g|webp|gif)(\?|$)", url, re.I):
