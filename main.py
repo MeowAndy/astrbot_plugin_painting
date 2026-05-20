@@ -974,7 +974,7 @@ class PaintingPlugin(Star):
         else:
             yield event.plain_result(f"咦？{label} 还没有{self.bot_name}的次数记录呢 🐾")
 
-    @filter.regex(r"^[\s\S]+$")
+    @filter.event_message_type(filter.EventMessageType.ALL)
     async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         after_prefix = self.strip_painting_prefix(msg)
@@ -1121,7 +1121,7 @@ class PaintingPlugin(Star):
                     return key, rest
         return None
 
-    @filter.regex(r"^[\s\S]+$")
+    @filter.event_message_type(filter.EventMessageType.ALL)
     async def dynamic_preset_handler(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         if not msg:
