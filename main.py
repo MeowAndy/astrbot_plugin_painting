@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
@@ -289,6 +289,49 @@ class PaintingPlugin(Star):
     # =========================
     # HTTP / image helpers
     # =========================
+
+    def normalize_api_url(self, raw: str, endpoint: str, base_raw: str = "") -> str:
+        """Accept either a full endpoint URL or a base URL and return a full API endpoint.
+
+        Some users paste only a New API/OpenAI-compatible base URL such as
+        `https://example.com` or `https://example.com/v1`. This helper makes the
+        image/chat endpoints explicit and rejects relative/incomplete values with
+        a readable error instead of surfacing aiohttp's confusing `Invalid URL`.
+        """
+        url = (raw or "").strip()
+        if not url:
+            return ""
+        if not re.match(r"^https?://", url, re.I):
+            if url.startswith("/") and re.match(r"^https?://", (base_raw or "").strip(), re.I):
+                base = urlparse((base_raw or "").strip())
+                url = urlunparse((base.scheme, base.netloc, url, "", "", ""))
+            else:
+                raise RuntimeError(f"接口地址必须以 http:// 或 https:// 开头，当前为：{url}")
+
+        endpoint = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+        parsed = urlparse(url)
+        path = parsed.path.rstrip("/")
+        endpoint_tail = endpoint.rstrip("/")
+
+        if path.endswith(endpoint_tail):
+            return url
+        if endpoint_tail.endswith("/images/generations"):
+            if path.endswith("/v1"):
+                path = f"{path}/images/generations"
+            elif path.endswith("/v1/images"):
+                path = f"{path}/generations"
+            else:
+                path = f"{path}/v1/images/generations" if path else endpoint_tail
+        elif endpoint_tail.endswith("/chat/completions"):
+            if path.endswith("/v1"):
+                path = f"{path}/chat/completions"
+            elif path.endswith("/v1/chat"):
+                path = f"{path}/completions"
+            else:
+                path = f"{path}/v1/chat/completions" if path else endpoint_tail
+        else:
+            path = f"{path}{endpoint}" if path else endpoint_tail
+        return urlunparse(parsed._replace(path=path))
 
     async def request_json(self, method: str, url: str, *, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as session:
@@ -607,7 +650,7 @@ class PaintingPlugin(Star):
         yield event.plain_result(f"✅ 已删除 {label} 的绘图次数记录。")
 
     @filter.regex(r"^[/#!]bnn(\d*)\s+([\s\S]+)$")
-    async def make_bnn(self, event: AstrMessageEvent):
+    async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
         api_err = self.check_api_key()
         if api_err:
             yield event.plain_result(api_err)
@@ -668,7 +711,7 @@ class PaintingPlugin(Star):
             yield event.plain_result(f"❌ 查询失败：{exc}")
 
     @filter.regex(r"^[/#!]?.+$", priority=-1)
-    async def dynamic_preset_handler(self, event: AstrMessageEvent):
+    async def dynamic_preset_handler(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         if not msg:
             return
@@ -708,10 +751,15 @@ class PaintingPlugin(Star):
 
     async def _generate_text_to_image(self, event: AstrMessageEvent, prompt: str, count: int) -> None:
         start = time.time()
-        url = str(self.cfg("image_api_url", "")).strip()
+        raw_url = str(self.cfg("image_api_url", "")).strip()
         model = str(self.cfg("image_model_name", "gpt-image-2")).strip()
-        if not url:
+        if not raw_url:
             await self.send_text(event, "⚠️ 尚未配置 image_api_url。")
+            return
+        try:
+            url = self.normalize_api_url(raw_url, "/v1/images/generations", str(self.cfg("api_url", "")))
+        except Exception as exc:
+            await self.send_text(event, f"⚠️ image_api_url 配置错误：{exc}")
             return
         success: List[Path] = []
         errors: List[str] = []
@@ -736,10 +784,15 @@ class PaintingPlugin(Star):
 
     async def _generate_with_reference(self, event: AstrMessageEvent, prompt: str, image_urls: List[str], count: int, kind: str) -> None:
         start = time.time()
-        api_url = str(self.cfg("api_url", "")).strip()
+        raw_api_url = str(self.cfg("api_url", "")).strip()
         model = str(self.cfg("model_name", "gpt-5.5")).strip()
-        if not api_url:
+        if not raw_api_url:
             await self.send_text(event, "⚠️ 尚未配置 api_url。")
+            return
+        try:
+            api_url = self.normalize_api_url(raw_api_url, "/v1/chat/completions")
+        except Exception as exc:
+            await self.send_text(event, f"⚠️ api_url 配置错误：{exc}")
             return
         responses_url = api_url.replace("/v1/chat/completions", "/v1/responses")
         image_content, failed = await self.image_urls_as_content(image_urls, 5)
@@ -776,8 +829,13 @@ class PaintingPlugin(Star):
 
     async def _generate_preset(self, event: AstrMessageEvent, prompt: str, image_urls: List[str], preset_name: str) -> None:
         start = time.time()
-        api_url = str(self.cfg("api_url", "")).strip()
+        raw_api_url = str(self.cfg("api_url", "")).strip()
         model = str(self.cfg("model_name", "gpt-5.5")).strip()
+        try:
+            api_url = self.normalize_api_url(raw_api_url, "/v1/chat/completions")
+        except Exception as exc:
+            await self.send_text(event, f"⚠️ api_url 配置错误：{exc}")
+            return
         image_content, failed = await self.image_urls_as_content(image_urls, 1)
         if failed and image_urls:
             await self.send_text(event, "呜呜，获取你发的图片失败了（可能图片已过期），请重新发送图片试试哦~ 🥺")
