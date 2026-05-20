@@ -799,6 +799,46 @@ class PaintingPlugin(Star):
             return None, raw
         return count, raw[match.end():].strip()
 
+    def _normalize_digits(self, text: str) -> str:
+        return text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+
+    def parse_add_count_and_target(self, event: AstrMessageEvent, raw: str) -> Tuple[Optional[int], str]:
+        """解析加次数参数，兼容 Yunzai 的 count-first，也兼容 @目标 count。
+
+        支持：
+        - #绘图增加次数 10
+        - #绘图增加次数10
+        - #绘图增加次数 10 u123 / 10 群号 / 10 @某人
+        - #绘图增加次数@某人 10
+        - #绘图增加次数 u123 10
+        """
+        raw = (raw or "").strip()
+
+        # 标准 Yunzai 写法：次数在最前面。
+        count, rest = self.parse_positive_count_and_rest(raw)
+        if count is not None:
+            return count, rest
+
+        # @某人 10：消息链里能拿到 at，次数取文本中的最后一个数字，避免 CQ:at 里的 qq 号干扰。
+        if self.at_target_user(event):
+            nums = list(re.finditer(r"[0-9０-９]+", raw))
+            if nums:
+                m = nums[-1]
+                digits = self._normalize_digits(m.group(0))
+                count = int(digits)
+                if count > 0:
+                    rest = (raw[:m.start()] + raw[m.end():]).strip()
+                    return count, rest
+
+        # uQQ号 10：目标在前，次数在后。
+        m = re.match(r"^(u[0-9０-９]+)\s+([0-9０-９]+)\s*$", raw, re.I)
+        if m:
+            count = int(self._normalize_digits(m.group(2)))
+            if count > 0:
+                return count, m.group(1)
+
+        return None, raw
+
     def parse_usage_target(self, event: AstrMessageEvent, raw: str, allow_default: bool = True) -> Tuple[Optional[str], str]:
         at_uid = self.at_target_user(event)
         if at_uid:
@@ -864,7 +904,7 @@ class PaintingPlugin(Star):
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
-        count, target_raw = self.parse_positive_count_and_rest(raw)
+        count, target_raw = self.parse_add_count_and_target(event, raw)
         if count is None:
             yield event.plain_result("唔...充值的次数必须是正整数才行呀！✨")
             return
