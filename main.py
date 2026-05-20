@@ -263,7 +263,29 @@ class PaintingPlugin(Star):
             self.presets = saved
             self.rebuild_preset_regex()
             return
+
+        # 首次安装插件时，先立刻加载仓库内置焚决，避免远程网络不可用/较慢导致没有预设。
+        if await self.load_builtin_presets():
+            print(f"[Painting] ✅ 首次启动已安装内置焚决预设 {len(self.presets)} 条。")
+            return
+
         await self.fetch_presets()
+
+    async def load_builtin_presets(self) -> bool:
+        builtin = Path(__file__).parent / "presets" / "ht.json"
+        if not builtin.exists():
+            return False
+        try:
+            data = json.loads(builtin.read_text(encoding="utf-8"))
+            if not isinstance(data, list) or not data:
+                return False
+            self.presets = data
+            self.rebuild_preset_regex()
+            await self.kv_put("presets", data)
+            return True
+        except Exception as exc:
+            print(f"[Painting] ❎ 读取内置焚决预设失败: {exc}")
+            return False
 
     def rebuild_preset_regex(self) -> None:
         keywords: List[str] = []
@@ -302,19 +324,9 @@ class PaintingPlugin(Star):
                 print(f"[Painting] ⚠️ 从 {name} 拉取失败: {exc}，尝试下一个源...")
 
         # 所有远程源失败，尝试内置文件
-        builtin = Path(__file__).parent / "presets" / "ht.json"
-        if builtin.exists():
-            try:
-                import json as _json
-                data = _json.loads(builtin.read_text(encoding="utf-8"))
-                if isinstance(data, list) and data:
-                    self.presets = data
-                    self.rebuild_preset_regex()
-                    await self.kv_put("presets", data)
-                    print(f"[Painting] ✅ 远程源均不可用，已从内置预设加载 {len(self.presets)} 条焚决。")
-                    return True
-            except Exception as exc:
-                print(f"[Painting] ❎ 读取内置预设也失败: {exc}")
+        if await self.load_builtin_presets():
+            print(f"[Painting] ✅ 远程源均不可用，已从内置预设加载 {len(self.presets)} 条焚决。")
+            return True
 
         print("[Painting] ❎ 所有焚决预设源均不可用！")
         return False
@@ -610,12 +622,26 @@ class PaintingPlugin(Star):
     # Commands
     # =========================
 
-    @filter.command("更新焚决", alias=["绘图更新预设"])
+    def is_update_presets_command(self, msg: str) -> bool:
+        msg = (msg or "").strip()
+        if not msg:
+            return False
+        candidates = {"更新焚决", "更新焚诀", "绘图更新预设"}
+        if msg in candidates:
+            return True
+        for prefix in {self.command_prefix, "#", "/", "!"}:
+            if prefix and msg.startswith(prefix) and msg[len(prefix):].strip() in candidates:
+                return True
+        return False
+
+    @filter.regex(r"^.{0,10}(更新焚[决诀]|绘图更新预设)$")
     async def update_resources(self, event: AstrMessageEvent):
+        if not self.is_update_presets_command(self.text(event)):
+            return
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，只有主人才能更新{self.bot_name}的魔法书哦~ 🙅‍♀️")
             return
-        yield event.plain_result("正在拉取最新焚决预设（GitHub → 云端 → 内置），请稍等...")
+        yield event.plain_result("叮咚~ 更新焚诀中~请稍后...\n正在拉取最新焚决预设（GitHub → 云端 → 内置）")
         ok = await self.fetch_presets()
         if ok:
             yield event.plain_result(f"✅ 魔法书更新成功！\n已加载 {len(self.presets)} 条神奇咒语。✨")
@@ -833,7 +859,7 @@ class PaintingPlugin(Star):
             return
         after_prefix = msg[len(prefix):]
         # 跳过已被其他 command 处理的指令
-        skip_prefixes = ("bnn", "绘图", "更新焚决", "查询额度", "查余额", "查询api", "查api")
+        skip_prefixes = ("bnn", "绘图", "更新焚决", "更新焚诀", "查询额度", "查余额", "查询api", "查api")
         for sp in skip_prefixes:
             if after_prefix.startswith(sp):
                 return
