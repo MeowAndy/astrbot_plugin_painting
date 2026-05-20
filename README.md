@@ -45,6 +45,7 @@ pip install -r astrbot_plugin_painting/requirements.txt
 | `initial_user_count` | 新群/新用户初始次数 |
 | `preset_json_url` | 云端预设 JSON 地址 |
 | `bot_name` | 回复里显示的角色名 |
+| `command_prefix` | 画图指令独立前缀，如 `#` / `!` / `xy` / `菲比`；填 `xy` 时直接发 `xybnn` 或 `xy预设`，不需要再加 `#` |
 | `balance_base_url` | 余额查询 API 基础地址，可留空 |
 
 ## 指令

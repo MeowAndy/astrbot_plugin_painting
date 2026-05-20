@@ -76,9 +76,35 @@ class PaintingPlugin(Star):
 
     @property
     def command_prefix(self) -> str:
-        """画图指令前缀（唤醒词），可在 Web 面板修改。"""
+        """画图指令前缀（唤醒词），可在 Web 面板修改。
+
+        这里的前缀是插件自己的独立前缀，不依赖 AstrBot 全局命令前缀。
+        例如填 `xy`，用户应直接发送 `xybnn` / `xy预设关键词`。
+        """
         raw = str(self.cfg("command_prefix", "#")).strip()
         return raw if raw else "#"
+
+    def painting_prefix_candidates(self) -> List[str]:
+        """返回可用于 bnn/预设的插件前缀候选。
+
+        - Web 填 `xy`：主用 `xy`，兼容 `#xy` `/xy` `!xy`
+        - Web 填 `#xy`：主用 `#xy`，兼容 `xy`
+        - Web 填默认 `#`：只使用 `#`
+        """
+        raw = self.command_prefix
+        candidates = {raw}
+        if len(raw) > 1 and raw[0] in "#/!":
+            candidates.add(raw[1:])
+        elif raw not in {"#", "/", "!"}:
+            candidates.update({f"#{raw}", f"/{raw}", f"!{raw}"})
+        return sorted((x for x in candidates if x), key=len, reverse=True)
+
+    def strip_painting_prefix(self, msg: str) -> Optional[str]:
+        msg = (msg or "").strip()
+        for prefix in self.painting_prefix_candidates():
+            if msg.startswith(prefix):
+                return msg[len(prefix):].strip()
+        return None
 
     @property
     def bnn_max_count(self) -> int:
@@ -720,7 +746,7 @@ class PaintingPlugin(Star):
 
     def strip_command_body(self, msg: str, *commands: str) -> Optional[str]:
         msg = (msg or "").strip()
-        prefixes = {"", self.command_prefix, "#", "/", "!"}
+        prefixes = {"", "#", "/", "!", *self.painting_prefix_candidates()}
         for prefix in prefixes:
             for command in commands:
                 full = f"{prefix}{command}"
@@ -885,15 +911,12 @@ class PaintingPlugin(Star):
         else:
             yield event.plain_result(f"咦？{label} 还没有{self.bot_name}的次数记录呢 🐾")
 
-    @filter.regex(r"^.{1,10}bnn(\d*)\s+([\s\S]+)$")
+    @filter.regex(r"^[\s\S]{1,30}bnn(\d*)\s+([\s\S]+)$")
     async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
-        prefix = self.command_prefix
-        # 验证消息确实以配置的前缀开头
-        if not msg.startswith(prefix):
+        after_prefix = self.strip_painting_prefix(msg)
+        if after_prefix is None:
             return
-        # 去掉前缀后检查是否是 bnn 指令
-        after_prefix = msg[len(prefix):]
         match = re.match(r"^bnn(\d*)\s+([\s\S]+)$", after_prefix)
         if not match:
             return
@@ -1016,11 +1039,9 @@ class PaintingPlugin(Star):
         msg = self.text(event)
         if not msg:
             return
-        prefix = self.command_prefix
-        # 必须以配置的前缀开头
-        if not msg.startswith(prefix):
+        after_prefix = self.strip_painting_prefix(msg)
+        if after_prefix is None:
             return
-        after_prefix = msg[len(prefix):]
         # 跳过已被其他 command 处理的指令
         skip_prefixes = ("bnn", "绘图", "更新焚决", "更新焚诀", "查询额度", "查余额", "查询api", "查api", "开启bnn存图", "关闭bnn存图", "排行bnn")
         for sp in skip_prefixes:
