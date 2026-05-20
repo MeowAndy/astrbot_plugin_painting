@@ -974,7 +974,7 @@ class PaintingPlugin(Star):
         else:
             yield event.plain_result(f"咦？{label} 还没有{self.bot_name}的次数记录呢 🐾")
 
-    @filter.regex(r"^[\s\S]{1,30}bnn(\d*)\s+([\s\S]+)$")
+    @filter.regex(r"^[\s\S]+$")
     async def make_bnn(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         after_prefix = self.strip_painting_prefix(msg)
