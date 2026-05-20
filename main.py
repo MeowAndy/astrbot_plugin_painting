@@ -1097,7 +1097,31 @@ class PaintingPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"❌ 查询失败：{exc}")
 
-    @filter.regex(r"^.+$", priority=-1)
+    def match_preset_command(self, text: str) -> Optional[Tuple[str, Optional[str]]]:
+        """匹配去掉前缀后的预设命令，返回 (关键词, 数量/用户后缀)。"""
+        text = (text or "").strip()
+        if not text:
+            return None
+        if self.preset_reg:
+            match = self.preset_reg.match(text)
+            if match:
+                return match.group(1), match.group(2) or match.group(3)
+        # 兜底：不依赖巨型 regex，直接按关键词长度降序匹配，支持 xyQ版 / xyQ版2 / xyQ版@123。
+        keywords: List[str] = []
+        for preset in self.presets:
+            for key in preset.get("keywords", []) or []:
+                if key:
+                    keywords.append(str(key))
+        for key in sorted(set(keywords), key=len, reverse=True):
+            if text == key:
+                return key, None
+            if text.startswith(key):
+                rest = text[len(key):].strip()
+                if re.fullmatch(r"(?:@(\d+)|(\d+))", rest):
+                    return key, rest
+        return None
+
+    @filter.regex(r"^[\s\S]+$")
     async def dynamic_preset_handler(self, event: AstrMessageEvent, *args, **kwargs):
         msg = self.text(event)
         if not msg:
@@ -1110,11 +1134,8 @@ class PaintingPlugin(Star):
         for sp in skip_prefixes:
             if after_prefix.startswith(sp):
                 return
-        if not self.preset_reg:
-            return
-        # 预设 regex 匹配去掉前缀后的内容
-        match = self.preset_reg.match(after_prefix)
-        if not match:
+        matched = self.match_preset_command(after_prefix)
+        if not matched:
             return
         api_err = self.check_api_key()
         if api_err:
@@ -1122,7 +1143,7 @@ class PaintingPlugin(Star):
             return
         if not await self.ensure_enough_count(event, 1):
             return
-        keyword = match.group(1)
+        keyword = matched[0]
         preset = next((p for p in self.presets if keyword in (p.get("keywords", []) or [])), None)
         if not preset:
             return
