@@ -12,6 +12,8 @@
 - 💾 `#开启bnn存图` / `#关闭bnn存图` 本地存图开关
 - 🏆 `#排行bnn` 本周作画统计排行
 - 💰 API 额度查询（需要配置 `balance_base_url`）
+- 🧠 内置 AstrBot Skill：机器人可自动解释插件用法、次数机制与常见问题
+- 🌐 内置中英文 i18n：AstrBot 控制台展示名和配置说明更清晰
 - ⚙️ 所有关键参数都支持 AstrBot 网页控制台配置：API Key、模型、超时时间等
 
 ## 安装
@@ -72,6 +74,8 @@ pip install -r astrbot_plugin_painting/requirements.txt
 - 插件不会硬编码 API Key，请在网页控制台填写。
 - 图片会先下载并转为 base64 再发给 API，避免 QQ/Telegram 临时图片 URL 外部不可访问。
 - 计数和预设使用 AstrBot 插件 KV 存储。
+- 运行数据保存到 AstrBot 数据目录 `plugin_data/astrbot_plugin_painting/`，符合 AstrBot 插件数据隔离建议。
+- 插件包含 `skills/painting-usage/SKILL.md`，可随插件加载到 AstrBot Skill Manager，用于让 AI 更准确回答 Painting 使用问题。
 
 ## License
 

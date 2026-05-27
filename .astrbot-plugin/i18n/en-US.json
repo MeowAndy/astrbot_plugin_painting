@@ -1,0 +1,61 @@
+{
+  "metadata": {
+    "display_name": "Painting",
+    "short_desc": "AI image generation with presets, custom prompts, and quotas.",
+    "desc": "An AstrBot port of Yunzai Painting.js. Supports remote presets, #bnn text/image-to-image generation, group/user quotas, local image saving, ranking, and API balance lookup."
+  },
+  "config": {
+    "api_url": {
+      "description": "Chat / multimodal API URL",
+      "hint": "OpenAI-compatible /v1/chat/completions endpoint or same-origin URL for preset/reference-image generation."
+    },
+    "api_key": {
+      "description": "API Key",
+      "hint": "Fill this in the dashboard. The plugin never hardcodes secrets."
+    },
+    "model_name": {
+      "description": "Chat / multimodal model",
+      "hint": "Used for preset and reference-image generation."
+    },
+    "image_api_url": {
+      "description": "Images Generations API URL",
+      "hint": "OpenAI-compatible /v1/images/generations endpoint for #bnn text-to-image generation."
+    },
+    "image_model_name": {
+      "description": "Image generation model",
+      "hint": "Used for #bnn text-to-image generation, for example gpt-image-2."
+    },
+    "api_timeout": {
+      "description": "API timeout (seconds)",
+      "hint": "Image generation is usually slow; 180-300 seconds is recommended."
+    },
+    "bnn_max_count": {
+      "description": "Max images per #bnn request",
+      "hint": "Limits the number of images per request to reduce abuse."
+    },
+    "initial_user_count": {
+      "description": "Initial quota for new users/groups",
+      "hint": "Drawing quota automatically assigned on first use."
+    },
+    "preset_json_url": {
+      "description": "Fallback preset JSON URL",
+      "hint": "GitHub presets are tried first, then this URL, then bundled presets."
+    },
+    "bot_name": {
+      "description": "Bot display name",
+      "hint": "Name used in reply messages."
+    },
+    "master_ids": {
+      "description": "Admin / owner ID list",
+      "hint": "Separate multiple IDs with commas, spaces, or newlines; used when platform permissions are unavailable."
+    },
+    "balance_base_url": {
+      "description": "Balance API base URL",
+      "hint": "Optional. Leave empty to disable #查询额度 / #查余额."
+    },
+    "command_prefix": {
+      "description": "Painting command prefix / wake word",
+      "hint": "Examples: # / ! / xy / 菲比. If set to xy, use xybnn or xy preset directly."
+    }
+  }
+}

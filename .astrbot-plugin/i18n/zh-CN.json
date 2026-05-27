@@ -1,0 +1,61 @@
+{
+  "metadata": {
+    "display_name": "Painting 画图",
+    "short_desc": "AI 画图插件：预设画图、自定义提示词、次数管理。",
+    "desc": "从 Yunzai Painting.js 移植的 AstrBot 画图插件，支持云端预设、#bnn 文生图/图生图、群/个人次数管理、本地存图、排行和 API 额度查询。"
+  },
+  "config": {
+    "api_url": {
+      "description": "Chat/多模态 API 地址",
+      "hint": "OpenAI 兼容的 /v1/chat/completions 或同域地址，用于预设画图/参考图画图。"
+    },
+    "api_key": {
+      "description": "API Key",
+      "hint": "请在控制台填写，插件不会在代码中硬编码密钥。"
+    },
+    "model_name": {
+      "description": "Chat/多模态模型名",
+      "hint": "用于预设画图和参考图画图。"
+    },
+    "image_api_url": {
+      "description": "Images Generations API 地址",
+      "hint": "OpenAI 兼容的 /v1/images/generations 接口地址，用于 #bnn 纯文生图。"
+    },
+    "image_model_name": {
+      "description": "图片生成模型名",
+      "hint": "用于 #bnn 文生图，例如 gpt-image-2。"
+    },
+    "api_timeout": {
+      "description": "API 超时时间（秒）",
+      "hint": "图片生成通常较慢，建议 180~300 秒。"
+    },
+    "bnn_max_count": {
+      "description": "#bnn 单次最多生成数量",
+      "hint": "限制单次最多生成几张，防止滥用。"
+    },
+    "initial_user_count": {
+      "description": "新用户/群初始次数",
+      "hint": "首次使用时自动分配的画图次数。"
+    },
+    "preset_json_url": {
+      "description": "预设 JSON 备用地址",
+      "hint": "插件优先从 GitHub 拉取焚决，失败后回退此地址，再失败使用内置预设。"
+    },
+    "bot_name": {
+      "description": "机器人角色名",
+      "hint": "回复消息中显示的角色名。"
+    },
+    "master_ids": {
+      "description": "管理员/主人 ID 列表",
+      "hint": "多个 ID 用英文逗号、空格或换行分隔；用于兼容 AstrBot 平台权限字段不可用的情况。"
+    },
+    "balance_base_url": {
+      "description": "余额查询 API 基础地址",
+      "hint": "可选。留空则禁用 #查询额度 / #查余额。"
+    },
+    "command_prefix": {
+      "description": "画图指令前缀（唤醒词）",
+      "hint": "例如 # / ! / xy / 菲比；填 xy 时直接发送 xybnn 或 xy预设，不需要再加 #。"
+    }
+  }
+}

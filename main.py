@@ -15,6 +15,7 @@ import aiohttp
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 import astrbot.api.message_components as Comp
 
 
@@ -39,7 +40,7 @@ class PaintingPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self.data_dir = Path("data") / "plugins" / PLUGIN_ID
+        self.data_dir = get_astrbot_data_path() / "plugin_data" / PLUGIN_ID
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.image_dir = self.data_dir / "generated_images"
         self.image_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +63,19 @@ class PaintingPlugin(Star):
             except Exception:
                 value = default
         return default if value is None else value
+
+    @staticmethod
+    def stop(event: AstrMessageEvent) -> None:
+        """Stop event propagation after this plugin has handled a command.
+
+        AstrBot dispatches plugin handlers by priority. Commands implemented with
+        broad regex/all-message handlers should explicitly stop propagation once
+        they match, otherwise the same user message may continue into other
+        plugins or the default LLM flow.
+        """
+        stopper = getattr(event, "stop_event", None)
+        if callable(stopper):
+            stopper()
 
     @property
     def bot_name(self) -> str:
@@ -689,6 +703,7 @@ class PaintingPlugin(Star):
     async def update_resources(self, event: AstrMessageEvent):
         if not self.is_update_presets_command(self.text(event)):
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，只有主人才能更新{self.bot_name}的魔法书哦~ 🙅‍♀️")
             return
@@ -745,6 +760,7 @@ class PaintingPlugin(Star):
     async def show_help(self, event: AstrMessageEvent):
         if not self.is_help_command(self.text(event)):
             return
+        self.stop(event)
         parts = self.build_help_parts()
         if await self.send_forward_texts(event, parts, f"{self.bot_name}的魔法使用帮助"):
             return
@@ -873,6 +889,7 @@ class PaintingPlugin(Star):
         raw = self.strip_command_body(self.text(event), "绘图查询次数")
         if raw is None:
             return
+        self.stop(event)
         stats = await self.daily_stats()
         target_id = None
         label = ""
@@ -906,6 +923,7 @@ class PaintingPlugin(Star):
         raw = self.strip_command_body(self.text(event), "绘图增加次数")
         if raw is None:
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
@@ -926,6 +944,7 @@ class PaintingPlugin(Star):
         raw = self.strip_command_body(self.text(event), "绘图查询所有次数", "绘图查询全部次数")
         if raw is None:
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
@@ -948,6 +967,7 @@ class PaintingPlugin(Star):
         raw = self.strip_command_body(self.text(event), "绘图删除所有次数", "绘图删除全部次数")
         if raw is None:
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
@@ -959,6 +979,7 @@ class PaintingPlugin(Star):
         raw = self.strip_command_body(self.text(event), "绘图删除次数")
         if raw is None:
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这个是主人的专属魔法，{self.bot_name}不能听你的哦~ 🙅‍♀️")
             return
@@ -983,6 +1004,7 @@ class PaintingPlugin(Star):
         match = re.match(r"^bnn(\d*)\s+([\s\S]+)$", after_prefix)
         if not match:
             return
+        self.stop(event)
         api_err = self.check_api_key()
         if api_err:
             yield event.plain_result(api_err)
@@ -1019,6 +1041,7 @@ class PaintingPlugin(Star):
         msg = self.text(event)
         if not self.is_simple_prefixed_command(msg, "开启bnn存图", "关闭bnn存图"):
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result("哼唧，只有主人才能切换存图哦~ 🙅‍♀️")
             return
@@ -1034,6 +1057,7 @@ class PaintingPlugin(Star):
     async def weekly_ranking(self, event: AstrMessageEvent):
         if not self.is_simple_prefixed_command(self.text(event), "排行bnn"):
             return
+        self.stop(event)
         stats = await self.daily_stats()
         daily = stats.get("daily", {}) if isinstance(stats.get("daily"), dict) else {}
         today = date.today()
@@ -1073,6 +1097,7 @@ class PaintingPlugin(Star):
     async def query_api(self, event: AstrMessageEvent):
         if not self.is_simple_prefixed_command(self.text(event), "查询额度", "查余额", "查询api", "查api"):
             return
+        self.stop(event)
         if not self.is_admin(event):
             yield event.plain_result(f"哼唧，这是主人的专属面板，{self.bot_name}不能随便给你看哦~ 🙅‍♀️")
             return
@@ -1137,6 +1162,7 @@ class PaintingPlugin(Star):
         matched = self.match_preset_command(after_prefix)
         if not matched:
             return
+        self.stop(event)
         api_err = self.check_api_key()
         if api_err:
             yield event.plain_result(api_err)
