@@ -37,9 +37,9 @@ class PaintingPlugin(Star):
     不在代码中硬编码密钥。
     """
 
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: Optional[AstrBotConfig] = None):
         super().__init__(context)
-        self.config = config
+        self.config = config or {}
         self.data_dir = get_astrbot_data_path() / "plugin_data" / PLUGIN_ID
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.image_dir = self.data_dir / "generated_images"
