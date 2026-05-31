@@ -66,16 +66,19 @@ class PaintingPlugin(Star):
 
     @staticmethod
     def stop(event: AstrMessageEvent) -> None:
-        """Stop event propagation after this plugin has handled a command.
+        """Mark this event as plugin-handled without hard-stopping the pipeline.
 
-        AstrBot dispatches plugin handlers by priority. Commands implemented with
-        broad regex/all-message handlers should explicitly stop propagation once
-        they match, otherwise the same user message may continue into other
-        plugins or the default LLM flow.
+        AstrBot v4.24.x logs `after_message_sent 终止了事件传播` whenever
+        `event.stop_event()` is called. For this plugin, the important part is
+        preventing a matched command from flowing into the default LLM, so prefer
+        `should_call_llm(False)` and avoid hard stop_event() by default.
         """
-        stopper = getattr(event, "stop_event", None)
-        if callable(stopper):
-            stopper()
+        should_call_llm = getattr(event, "should_call_llm", None)
+        if callable(should_call_llm):
+            try:
+                should_call_llm(False)
+            except Exception:
+                pass
 
     @property
     def bot_name(self) -> str:
