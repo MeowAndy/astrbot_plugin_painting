@@ -1182,6 +1182,11 @@ class PaintingPlugin(Star):
         if preset.get("needImage") and not image_urls:
             yield event.plain_result("呀，这个魔法需要你发送一张参考图片给我哦~ 🖼️")
             return
+        output_mode = str(preset.get("outputMode") or preset.get("mode") or "image").lower()
+        if output_mode in {"text", "prompt", "caption"}:
+            yield event.plain_result(f"🧾 {self.bot_name}收到 [{preset_name}] 指令啦，正在从图片里提取详细提示词，请稍等哦…")
+            await self._generate_preset_text(event, prompt, image_urls[:3], preset_name)
+            return
         yield event.plain_result(f"🪄 {self.bot_name}收到 [{preset_name}] 指令啦，正在为你施展魔法，请稍等哦… 🎨")
         await self._generate_preset(event, prompt, image_urls[:1], preset_name)
 
@@ -1266,6 +1271,65 @@ class PaintingPlugin(Star):
         if errors:
             text += "\n⚠️ " + "；".join(errors[:2])
         await self.send_images(event, success, text)
+
+    def extract_text_from_response(self, data: Dict[str, Any]) -> str:
+        """Extract assistant text from OpenAI-compatible chat/responses payloads."""
+        if not isinstance(data, dict):
+            return ""
+        parts: List[str] = []
+        choices = data.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            msg = choices[0].get("message") or {}
+            content = msg.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text") or item.get("content")
+                        if isinstance(text, str):
+                            parts.append(text)
+        output_text = data.get("output_text")
+        if isinstance(output_text, str):
+            parts.append(output_text)
+        for item in data.get("output", []) or []:
+            if isinstance(item, dict):
+                if isinstance(item.get("content"), list):
+                    for sub in item["content"]:
+                        if isinstance(sub, dict):
+                            text = sub.get("text") or sub.get("content")
+                            if isinstance(text, str):
+                                parts.append(text)
+                elif isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+        return "\n".join(x.strip() for x in parts if x and x.strip()).strip()
+
+    async def _generate_preset_text(self, event: AstrMessageEvent, prompt: str, image_urls: List[str], preset_name: str) -> None:
+        start = time.time()
+        raw_api_url = str(self.cfg("api_url", "")).strip()
+        model = str(self.cfg("model_name", "gpt-5.5")).strip()
+        try:
+            api_url = self.normalize_api_url(raw_api_url, "/v1/chat/completions")
+        except Exception as exc:
+            await self.send_text(event, f"⚠️ api_url 配置错误：{exc}")
+            return
+        image_content, failed = await self.image_urls_as_content(image_urls, 3)
+        if failed and image_urls:
+            await self.send_text(event, "呜呜，获取你发的图片失败了（可能图片已过期），请重新发送图片试试哦~ 🥺")
+            return
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        content.extend(image_content)
+        payload = {"model": model, "messages": [{"role": "user", "content": content}], "max_tokens": 2200, "stream": False}
+        try:
+            data = await self.request_json("POST", api_url, payload=payload)
+            text = self.extract_text_from_response(data)
+            if not text:
+                raise RuntimeError("响应中未找到文本内容")
+        except Exception as exc:
+            await self.send_text(event, f"呜呜呜...提示词提取失败了 ({time.time() - start:.2f}s)\n💣 报错啦: {exc} 🥺")
+            return
+        count_info = await self.consume_count_and_summary(event, 1)
+        await self.send_text(event, f"🧾 [{preset_name}] 提取完成，耗时 {time.time() - start:.2f}s{count_info}\n\n{text}")
 
     async def _generate_preset(self, event: AstrMessageEvent, prompt: str, image_urls: List[str], preset_name: str) -> None:
         start = time.time()
